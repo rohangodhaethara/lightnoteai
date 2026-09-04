@@ -6,6 +6,8 @@ tracked across frames, and replaced/removed/relabeled.
 
 Built for the LightNoteAI Full-Stack AI Developer technical assignment.
 
+![Completed job: Coca-Cola bottle replaced with Pepsi](docs/screenshots/05-completed.png)
+
 ## Demo
 
 - Local run instructions: see [Setup](#setup) below.
@@ -149,6 +151,20 @@ npm run dev
 
 Open `http://localhost:5173`. The Vite dev server proxies `/api` and
 `/media` to `http://localhost:8000` (see `vite.config.js`).
+
+### Headless smoke test (optional)
+
+`frontend/e2e_demo.mjs` drives the real UI end-to-end with Playwright
+(upload the sample video, submit the example prompt, poll to completion)
+and saves screenshots to `docs/screenshots/` — useful for verifying the
+full stack without a browser open, or for regenerating the README
+screenshot. Requires both dev servers running:
+
+```bash
+cd frontend
+npm install -D playwright && npx playwright install chromium
+node e2e_demo.mjs
+```
 
 ### Configuring an LLM (optional but recommended)
 
