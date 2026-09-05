@@ -59,17 +59,54 @@ def _centroid(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
 
 
 class ObjectTracker:
-    """Stateful per-video tracker: call `locate(frame)` for every frame in order."""
+    """Stateful per-video tracker: call `locate(frame)` for every frame in order.
 
-    def __init__(self, coco_class: Optional[str], conf_threshold: Optional[float] = None):
+    Detection/segmentation runs on a small resized copy of the frame (fast on
+    CPU); the resulting mask/bbox are then scaled back up to the frame's
+    actual resolution before being handed to the editor, so output quality
+    isn't capped by the detector's inference resolution.
+    """
+
+    def __init__(self, coco_class: Optional[str], conf_threshold: Optional[float] = None,
+                 detection_width: Optional[int] = None):
         self.coco_class = coco_class
         self.conf_threshold = conf_threshold or settings.yolo_conf_threshold
+        self.detection_width = detection_width or settings.detection_max_width
         self._last_bbox: Optional[tuple[int, int, int, int]] = None
         self._misses = 0
         self._max_hold_frames = 6
         self._use_model = model_available()
 
     def locate(self, frame_bgr: np.ndarray) -> FrameMask:
+        import cv2
+
+        h, w = frame_bgr.shape[:2]
+        if w > self.detection_width:
+            scale = self.detection_width / w
+            det_frame = cv2.resize(
+                frame_bgr, (self.detection_width, max(1, round(h * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        else:
+            scale = 1.0
+            det_frame = frame_bgr
+
+        result = self._locate_scaled(det_frame)
+        if not result.found or scale == 1.0:
+            return result
+
+        mask_full = cv2.resize(result.mask, (w, h), interpolation=cv2.INTER_NEAREST)
+        inv = 1.0 / scale
+        x1, y1, x2, y2 = result.bbox
+        bbox_full = (
+            max(0, int(round(x1 * inv))), max(0, int(round(y1 * inv))),
+            min(w, int(round(x2 * inv))), min(h, int(round(y2 * inv))),
+        )
+        return FrameMask(found=True, mask=mask_full, bbox=bbox_full, confidence=result.confidence)
+
+    def _locate_scaled(self, frame_bgr: np.ndarray) -> FrameMask:
+        """Detection logic operating entirely in the (possibly downscaled)
+        detection frame's coordinate space; `locate()` scales the result up."""
         if self._use_model:
             result = self._locate_with_model(frame_bgr)
             if result.found:

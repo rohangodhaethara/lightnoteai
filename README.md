@@ -48,13 +48,16 @@ polls:
    to the nearest class the vision model actually knows (`bottle`) via a
    synonym table — a real, practical constraint of using an off-the-shelf
    80-class detector instead of an open-vocabulary one.
-3. **`detecting_object`** — ffmpeg extracts frames (downscaled for CPU
-   speed).
-4. **`tracking_object`** / **`editing_frames`** — for every frame,
-   **YOLOv8n-seg** (Ultralytics, COCO-pretrained) returns bounding boxes +
-   pixel masks in one pass. A lightweight greedy tracker picks the instance
-   whose class matches and whose mask centroid is closest to the previous
-   frame's (with a short hold-over if a frame is missed), giving temporally
+3. **`detecting_object`** — ffmpeg extracts frames at (up to) the input's
+   native resolution.
+4. **`tracking_object`** / **`editing_frames`** — each frame is handed to
+   **YOLOv8n-seg** (Ultralytics, COCO-pretrained) as a small resized copy
+   for speed; the returned bounding box + pixel mask are then scaled back up
+   to the frame's actual resolution before editing, so output quality isn't
+   capped by the detector's inference resolution. A lightweight greedy
+   tracker picks the instance whose class matches and whose mask centroid is
+   closest to the previous frame's (with a short hold-over if a frame is
+   missed), giving temporally
    coherent detections without a heavier video-object-tracking model. Each
    frame is then edited with OpenCV:
    - **replace** → the reference image (or an auto-generated placeholder /
@@ -209,11 +212,19 @@ origins.
   hold-over**, not a dedicated video object tracker (SAM2/DeepSORT) — fast
   camera motion, occlusion, or multiple same-class objects in frame can
   cause it to lock onto the wrong instance.
-- **Replacement compositing is 2D** (resize + seamless clone into the
-  bounding box) — it does not model 3D pose/perspective of the original
-  object, so results look best on roughly frontal, single-object shots.
-  This is the area a production system would most likely swap for a
-  diffusion-based inpainting/compositing model.
+- **Replacement compositing is 2D** (aspect-preserving resize + Poisson
+  blend into the object's bounding box, confined to the detected mask) — it
+  does not model 3D pose/perspective of the original object, so results
+  look best on roughly frontal, single-object shots. This is the area a
+  production system would most likely swap for a diffusion-based
+  inpainting/compositing model.
+- **Replacement quality depends heavily on the reference image.** A clean,
+  roughly front-on product shot composites well. A candid/lifestyle photo
+  (e.g. a hand holding the product, a busy background) still gets pasted
+  as a rectangular crop, so those elements can show up in the result too.
+  Without a reference image, a synthesized placeholder (colour gradient +
+  label text) is used — visibly a placeholder, not a real product, by
+  design, since it's a graceful fallback rather than the primary path.
 - **Text replacement** is simplified: it inpaints the target region and
   draws the replacement text with a fixed font rather than running
   OCR + font/style matching.

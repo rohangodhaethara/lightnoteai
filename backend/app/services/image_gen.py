@@ -51,21 +51,34 @@ async def _generate_openai(prompt_text: str, size: int) -> np.ndarray:
 
 
 def _placeholder_image(label: str, size: int) -> np.ndarray:
-    """Deterministic colour per label so re-runs look consistent."""
+    """A full-bleed colour gradient with a label, used when neither a
+    reference image nor an image-gen API is available.
+
+    This is deliberately flat/edge-free rather than an outlined product
+    shape: `replace_object()` composites it with Poisson blending
+    (`cv2.seamlessClone`), which propagates *internal* gradients from the
+    source into the destination. A drawn silhouette or a hard-edged detail
+    (e.g. a cap-shaped rectangle) rarely lines up with the real object's
+    actual silhouette in the frame, and the mismatch shows up as dark/light
+    blotches. A smooth gradient has no internal edges to clash, so it blends
+    predictably regardless of the destination shape - at the cost of not
+    looking like an actual product. For a real product photo, upload a
+    reference image instead."""
     h = int(hashlib.sha1(label.encode()).hexdigest()[:6], 16)
-    color = ((h & 0xFF), (h >> 8) & 0xFF, (h >> 16) & 0xFF)
-    color = tuple(int(60 + c % 160) for c in color)
+    base_color = np.array([(h & 0xFF), (h >> 8) & 0xFF, (h >> 16) & 0xFF], dtype=np.float32)
+    base_color = 60 + (base_color % 160)  # BGR, kept mid-bright so it blends into scenes
 
-    img = np.full((size, size, 3), 255, dtype=np.uint8)
-    pad = size // 8
-    cv2.rectangle(img, (pad, pad), (size - pad, size - pad), color, thickness=-1, lineType=cv2.LINE_AA)
-    cv2.rectangle(img, (pad, pad), (size - pad, size - pad), (30, 30, 30), thickness=4, lineType=cv2.LINE_AA)
+    x = np.linspace(-1, 1, size, dtype=np.float32)
+    y = np.linspace(-1, 1, size, dtype=np.float32)
+    xx, yy = np.meshgrid(x, y)
+    sheen = 1.0 - 0.35 * np.sqrt(xx ** 2 + yy ** 2)
+    img = (base_color.reshape(1, 1, 3) * sheen[:, :, None]).clip(30, 255).astype(np.uint8)
 
-    text = label.strip() or "object"
+    text = (label.strip() or "object").split()[-1][:14]
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = max(0.5, min(1.4, (size * 0.8) / (len(text) * 22 + 1)))
+    font_scale = max(0.4, min(1.2, (size * 0.8) / (len(text) * 20 + 1)))
     (tw, th), _ = cv2.getTextSize(text, font, font_scale, 2)
-    org = (max(pad, (size - tw) // 2), size // 2 + th // 2)
+    org = ((size - tw) // 2, size // 2 + th // 2)
     cv2.putText(img, text, org, font, font_scale, (255, 255, 255), 2, cv2.LINE_AA)
 
     return img

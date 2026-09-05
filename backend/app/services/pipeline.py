@@ -52,7 +52,7 @@ async def process_job(job: Job) -> None:
                f"Video trimmed to first {settings.max_video_seconds}s for this CPU demo pipeline")
 
     _touch(job, JobStatus.DETECTING_OBJECT, 15, "Extracting frames")
-    fps = await ffmpeg_utils.extract_frames(working_video, frames_in, settings.process_max_width)
+    fps = await ffmpeg_utils.extract_frames(working_video, frames_in, settings.output_max_width)
 
     reference_bgr = None
     if job.reference_image_path:

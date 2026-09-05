@@ -29,27 +29,47 @@ def replace_object(
     if bw < 4 or bh < 4:
         return frame_bgr
 
-    resized = cv2.resize(replacement_bgr, (bw, bh), interpolation=cv2.INTER_AREA)
+    # Fit the replacement image into the bbox preserving its aspect ratio
+    # (rather than stretching it to fill) - a naive stretch smears any
+    # non-matching content (e.g. a hand or background in a candid reference
+    # photo) across the whole box. The fitted crop is pasted onto a copy of
+    # the original bbox pixels so seamlessClone has real image content to
+    # blend at the edges instead of a hard rectangle.
+    rh, rw = replacement_bgr.shape[:2]
+    scale = min(bw / rw, bh / rh)
+    new_w, new_h = max(1, round(rw * scale)), max(1, round(rh * scale))
+    resized = cv2.resize(replacement_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    off_x, off_y = (bw - new_w) // 2, (bh - new_h) // 2
+
+    canvas = frame_bgr[y1:y2, x1:x2].copy()
+    canvas[off_y:off_y + new_h, off_x:off_x + new_w] = resized
+
+    fit_mask = np.zeros((bh, bw), dtype=np.uint8)
+    fit_mask[off_y:off_y + new_h, off_x:off_x + new_w] = 255
 
     region_mask = mask[y1:y2, x1:x2]
     if region_mask.max() == 0:
-        region_mask = np.full((bh, bw), 255, dtype=np.uint8)
-    # Shrink slightly so the clone boundary sits inside the original object's
-    # silhouette rather than exactly on its noisy edge.
-    region_mask = cv2.erode(region_mask, np.ones((5, 5), np.uint8), iterations=1)
-    if region_mask.max() == 0:
-        region_mask = mask[y1:y2, x1:x2]
+        region_mask = fit_mask
+    else:
+        # Only blend where the pasted content AND the detected object
+        # silhouette overlap, so we don't pull in the frame's own background.
+        region_mask = cv2.bitwise_and(region_mask, fit_mask)
+    # Shrink slightly so the clone boundary sits inside the pasted content's
+    # edge rather than exactly on it.
+    eroded = cv2.erode(region_mask, np.ones((5, 5), np.uint8), iterations=1)
+    if eroded.max() > 0:
+        region_mask = eroded
 
     center = (x1 + bw // 2, y1 + bh // 2)
 
     try:
-        blended = cv2.seamlessClone(resized, frame_bgr, region_mask, center, cv2.NORMAL_CLONE)
+        blended = cv2.seamlessClone(canvas, frame_bgr, region_mask, center, cv2.NORMAL_CLONE)
         return blended
     except cv2.error:
         out = frame_bgr.copy()
         mask3 = cv2.merge([region_mask, region_mask, region_mask]).astype(np.float32) / 255.0
         roi = out[y1:y2, x1:x2].astype(np.float32)
-        out[y1:y2, x1:x2] = (resized.astype(np.float32) * mask3 + roi * (1 - mask3)).astype(np.uint8)
+        out[y1:y2, x1:x2] = (canvas.astype(np.float32) * mask3 + roi * (1 - mask3)).astype(np.uint8)
         return out
 
 

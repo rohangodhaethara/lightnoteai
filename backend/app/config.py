@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     openai_image_model: str = "gpt-image-1"
 
     max_video_seconds: int = 20
-    process_max_width: int = 640
+    output_max_width: int = 1280
+    detection_max_width: int = 640
     yolo_seg_model: str = "yolov8n-seg.pt"
     yolo_conf_threshold: float = 0.25
 
