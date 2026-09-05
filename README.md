@@ -198,6 +198,23 @@ Note: the frontend's production build talks to the API via
 to your backend's URL when deploying frontend and backend on different
 origins.
 
+### Troubleshooting: "port 8000 already in use" but nothing's using it
+
+On Windows, `netstat -ano | findstr :8000` can show a `LISTENING` entry
+with a PID that `taskkill`/Task Manager say doesn't exist — a stale socket
+left behind in the OS's TCP stack, not an actual running process. It
+usually only clears on reboot. Rather than reboot, just run both sides on
+a different port:
+
+```bash
+# backend
+uvicorn app.main:app --reload --port 8080
+
+# frontend (same shell session)
+BACKEND_PORT=8080 npm run dev        # macOS/Linux
+$env:BACKEND_PORT=8080; npm run dev  # PowerShell
+```
+
 ## API
 
 - `POST /api/jobs` — `multipart/form-data`: `prompt` (required), `video`
