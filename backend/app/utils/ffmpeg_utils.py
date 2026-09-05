@@ -35,6 +35,14 @@ def get_duration_seconds(path: Path) -> float:
     return float(info["format"].get("duration", 0.0))
 
 
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run a subprocess synchronously. Callers await this via asyncio.to_thread
+    instead of asyncio.create_subprocess_exec, which requires a Proactor event
+    loop on Windows and raises NotImplementedError under uvicorn --reload
+    (whose watcher can leave a Selector loop installed)."""
+    return subprocess.run(cmd, capture_output=True)
+
+
 async def extract_frames(video_path: Path, out_dir: Path, max_width: int) -> float:
     out_dir.mkdir(parents=True, exist_ok=True)
     fps = get_fps(video_path)
@@ -43,10 +51,9 @@ async def extract_frames(video_path: Path, out_dir: Path, max_width: int) -> flo
         "-vf", f"scale='min({max_width},iw)':-2",
         str(out_dir / "frame_%06d.png"),
     ]
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg frame extraction failed: {stderr.decode(errors='ignore')[-2000:]}")
+    result = await asyncio.to_thread(_run, cmd)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg frame extraction failed: {result.stderr.decode(errors='ignore')[-2000:]}")
     return fps
 
 
@@ -60,10 +67,9 @@ async def frames_to_video(frames_dir: Path, fps: float, out_path: Path, original
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         str(silent_path),
     ]
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg render failed: {stderr.decode(errors='ignore')[-2000:]}")
+    result = await asyncio.to_thread(_run, cmd)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg render failed: {result.stderr.decode(errors='ignore')[-2000:]}")
 
     has_audio = False
     if original_video is not None:
@@ -79,9 +85,8 @@ async def frames_to_video(frames_dir: Path, fps: float, out_path: Path, original
             "-map", "0:v:0", "-map", "1:a:0?", "-c:v", "copy", "-c:a", "aac",
             "-shortest", str(out_path),
         ]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
+        result = await asyncio.to_thread(_run, cmd)
+        if result.returncode != 0:
             shutil.move(str(silent_path), str(out_path))
         else:
             silent_path.unlink(missing_ok=True)
@@ -91,12 +96,10 @@ async def frames_to_video(frames_dir: Path, fps: float, out_path: Path, original
 
 async def trim_video(src: Path, dst: Path, max_seconds: int) -> None:
     cmd = ["ffmpeg", "-y", "-i", str(src), "-t", str(max_seconds), "-c", "copy", str(dst)]
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
+    result = await asyncio.to_thread(_run, cmd)
+    if result.returncode != 0:
         # fall back to re-encode trim if stream copy fails on this container
         cmd = ["ffmpeg", "-y", "-i", str(src), "-t", str(max_seconds), str(dst)]
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg trim failed: {stderr.decode(errors='ignore')[-2000:]}")
+        result = await asyncio.to_thread(_run, cmd)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg trim failed: {result.stderr.decode(errors='ignore')[-2000:]}")
