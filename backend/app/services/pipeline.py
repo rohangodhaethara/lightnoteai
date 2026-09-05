@@ -12,8 +12,9 @@ from app.config import OUTPUTS_DIR, UPLOADS_DIR, settings
 from app.job_store import Job
 from app.schemas import JobStatus, Operation
 from app.services import editor, image_gen
+from app.services.coco_classes import best_coco_match
 from app.services.instruction_parser import parse_instruction
-from app.services.vision import ObjectTracker
+from app.services.vision import ObjectTracker, isolate_product
 from app.utils import ffmpeg_utils
 
 logger = logging.getLogger("lightnoteai.pipeline")
@@ -57,6 +58,14 @@ async def process_job(job: Job) -> None:
     reference_bgr = None
     if job.reference_image_path:
         reference_bgr = cv2.imread(job.reference_image_path, cv2.IMREAD_COLOR)
+        if reference_bgr is not None:
+            replacement_class_hint = best_coco_match(instruction.replacement_object or instruction.target_object)
+            # Crop to the detected product and neutralize the background so a
+            # candid/lifestyle reference photo (a hand holding the product, a
+            # busy background) doesn't get composited into the video too -
+            # falls back to the original image untouched if nothing is
+            # confidently detected in it.
+            reference_bgr = await asyncio.to_thread(isolate_product, reference_bgr, replacement_class_hint)
 
     if instruction.operation == Operation.REPLACE_OBJECT and reference_bgr is None:
         replacement_label = instruction.replacement_object or instruction.target_object

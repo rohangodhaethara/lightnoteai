@@ -60,10 +60,16 @@ polls:
    missed), giving temporally
    coherent detections without a heavier video-object-tracking model. Each
    frame is then edited with OpenCV:
-   - **replace** → the reference image (or an auto-generated placeholder /
-     text-to-image result) is resized to the object's bounding box and
-     composited with `cv2.seamlessClone` (Poisson blending) so lighting/
-     color blends into the scene.
+   - **replace** → an uploaded reference image is first run through the same
+     YOLO detector and cropped to just the product (background/hands
+     neutralized to white), so a candid reference photo doesn't bring its
+     background along for the ride. The result (or an auto-generated
+     placeholder / text-to-image result if no reference image was given) is
+     then fit into the object's bounding box preserving aspect ratio and
+     composited with `cv2.seamlessClone` (Poisson blending), confined to
+     where the pasted content and the detected object's mask overlap - so
+     the original object's own shape (e.g. bottle glass/cap) stays intact
+     and lighting/color still blend into the scene.
    - **remove** → `cv2.inpaint` (Telea) fills the masked region.
    - **replace text** → the region is inpainted, then the new text is drawn
      back in with `cv2.putText`.
@@ -218,10 +224,15 @@ origins.
   look best on roughly frontal, single-object shots. This is the area a
   production system would most likely swap for a diffusion-based
   inpainting/compositing model.
-- **Replacement quality depends heavily on the reference image.** A clean,
-  roughly front-on product shot composites well. A candid/lifestyle photo
-  (e.g. a hand holding the product, a busy background) still gets pasted
-  as a rectangular crop, so those elements can show up in the result too.
+- **Replacement quality depends on the reference image being detectable.**
+  An uploaded reference photo is run through the same YOLO detector first
+  and cropped to just the product (background/hands neutralized to white)
+  before compositing - a clean, roughly front-on product shot isolates
+  cleanly and composites near-photorealistically. A candid/close-up photo
+  the detector can't confidently recognize (tested with a hand-holding-a-
+  bottle close-up shot at an unusual crop where YOLO saw "person"/"cell
+  phone" instead of "bottle") falls back to using the raw uploaded image
+  as-is, so any background/hands in it can show up in the result too.
   Without a reference image, a synthesized placeholder (colour gradient +
   label text) is used — visibly a placeholder, not a real product, by
   design, since it's a graceful fallback rather than the primary path.

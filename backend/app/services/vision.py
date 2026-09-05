@@ -58,6 +58,34 @@ def _centroid(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
     return (x1 + x2) / 2, (y1 + y2) / 2
 
 
+def isolate_product(image_bgr: np.ndarray, coco_class_hint: Optional[str] = None) -> np.ndarray:
+    """Detect the product in a user-uploaded reference image and return a
+    bbox-cropped version with everything outside its segmentation mask
+    painted neutral white, so a candid/lifestyle photo (a hand holding the
+    product, a busy background) doesn't get composited into the video along
+    with the product. Falls back to the original image unchanged if nothing
+    is confidently detected (e.g. an already-isolated product shot, or the
+    model being unavailable) - this is a best-effort cleanup, not required
+    for good results with a clean reference photo."""
+    import cv2
+
+    tracker = ObjectTracker(coco_class=coco_class_hint)
+    result = tracker.locate(image_bgr)
+    if not result.found or result.mask is None or result.bbox is None:
+        return image_bgr
+
+    x1, y1, x2, y2 = result.bbox
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return image_bgr
+
+    crop = image_bgr[y1:y2, x1:x2]
+    mask_crop = result.mask[y1:y2, x1:x2]
+    mask3 = cv2.merge([mask_crop, mask_crop, mask_crop]).astype(np.float32) / 255.0
+    neutral = np.full_like(crop, 255)
+    isolated = (crop.astype(np.float32) * mask3 + neutral.astype(np.float32) * (1 - mask3)).astype(np.uint8)
+    return isolated
+
+
 class ObjectTracker:
     """Stateful per-video tracker: call `locate(frame)` for every frame in order.
 
